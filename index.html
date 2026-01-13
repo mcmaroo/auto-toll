@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AUTO TOLL | نظام بوابات ذكي</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #020617; color: #f8fafc; overflow-x: hidden; }
+        .toast-enter { transform: translateY(-20px); opacity: 0; }
+        .toast-active { transform: translateY(0); opacity: 1; transition: all 0.4s ease-out; }
+        .glass-card { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(51, 65, 85, 0.5); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const SUPABASE_URL = 'https://eakwicttewontgjkcuci.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_3drTyNWZGsuhE3F6-Qi0qw_4WTO9RkK';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        const USER_CREDENTIALS = {
+            marwan: { password: 'Marwan@123', plate: 'أ ب ت 3900', name: 'مروان أحمد', role: 'driver' },
+            ahmed: { password: 'Ahmed@123', plate: 'ج د هـ 7744', name: 'أحمد علي', role: 'driver' },
+            ambulance: { password: 'Ambulance@911', plate: '٩١١', name: 'إسعاف 01', role: 'emergency' },
+            admin: { password: 'Admin@123', plate: null, name: 'المدير العام', role: 'admin' }
+        };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [logs, setLogs] = useState([]);
+            const [notification, setNotification] = useState(null);
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+
+            // تفعيل التنبيه
+            const triggerNotification = (log) => {
+                setNotification(log);
+                setTimeout(() => setNotification(null), 4000); // تختفي بعد 4 ثواني
+            };
+
+            useEffect(() => {
+                if (!user) return;
+
+                const fetchLogs = async () => {
+                    let { data } = await supabaseClient.from('toll_logs').select('*').order('created_at', { ascending: false }).limit(20);
+                    if (user.role !== 'admin') {
+                        data = data.filter(l => l.car_plate === user.plate);
+                    }
+                    setLogs(data || []);
+                };
+
+                fetchLogs();
+
+                const channel = supabaseClient.channel('realtime_changes')
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'toll_logs' }, (payload) => {
+                        const newLog = payload.new;
+                        if (user.role === 'admin' || newLog.car_plate === user.plate) {
+                            setLogs(prev => [newLog, ...prev]);
+                            triggerNotification(newLog); // إرسال الإشعار فور وصول البيانات
+                        }
+                    })
+                    .subscribe();
+
+                return () => supabaseClient.removeChannel(channel);
+            }, [user]);
+
+            const login = (e) => {
+                e.preventDefault();
+                const u = USER_CREDENTIALS[username.toLowerCase()];
+                if (u && u.password === password) setUser(u);
+                else alert("خطأ في البيانات!");
+            };
+
+            if (!user) return (
+                <div className="flex items-center justify-center min-h-screen p-6">
+                    <div className="glass-card p-8 rounded-3xl w-full max-w-md shadow-2xl">
+                        <div className="text-center mb-8">
+                            <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-900/40">
+                                🚗
+                            </div>
+                            <h1 className="text-3xl font-bold">AUTO TOLL</h1>
+                            <p className="text-slate-400">نظام التحصيل الذكي</p>
+                        </div>
+                        <form onSubmit={login} className="space-y-4">
+                            <input type="text" placeholder="اسم المستخدم" className="w-full p-4 bg-slate-950 rounded-2xl border border-slate-800 outline-none focus:border-blue-500 transition-all" value={username} onChange={e => setUsername(e.target.value)} />
+                            <input type="password" placeholder="كلمة المرور" className="w-full p-4 bg-slate-950 rounded-2xl border border-slate-800 outline-none focus:border-blue-500 transition-all" value={password} onChange={e => setPassword(e.target.value)} />
+                            <button className="w-full bg-blue-600 p-4 rounded-2xl font-bold text-white hover:bg-blue-700 active:scale-95 transition-all">دخول النظام</button>
+                        </form>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen pb-12 px-4 md:px-8 max-w-5xl mx-auto">
+                    {/* الإشعار */}
+                    {notification && (
+                        <div className="fixed top-6 left-6 right-6 md:left-auto md:w-96 z-50 animate-bounce">
+                            <div className="bg-blue-600 text-white p-5 rounded-3xl shadow-2xl flex items-center gap-4 border border-blue-400">
+                                <div className="bg-white/20 p-3 rounded-2xl text-2xl">🔔</div>
+                                <div>
+                                    <h4 className="font-bold">تم دفع رسوم عبور!</h4>
+                                    <p className="text-sm opacity-90">{notification.car_name} | {notification.charge} EGP</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <header className="flex justify-between items-center py-8">
+                        <div>
+                            <h1 className="text-2xl font-bold text-blue-500">AUTO TOLL</h1>
+                            <p className="text-slate-400 text-sm">{user.name}</p>
+                        </div>
+                        <button onClick={() => setUser(null)} className="bg-slate-900 px-4 py-2 rounded-xl text-red-400 border border-slate-800 text-sm">خروج</button>
+                    </header>
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8 text-center">
+                        <div className="glass-card p-6 rounded-3xl col-span-2 md:col-span-1">
+                            <p className="text-slate-400 text-xs mb-2">الرصيد المتبقي</p>
+                            <h2 className="text-3xl font-bold text-green-400">{logs[0]?.new_balance || 0} <span className="text-sm">EGP</span></h2>
+                        </div>
+                        <div className="glass-card p-6 rounded-3xl">
+                            <p className="text-slate-400 text-xs mb-2">عمليات اليوم</p>
+                            <h2 className="text-3xl font-bold">{logs.length}</h2>
+                        </div>
+                        <div className="glass-card p-6 rounded-3xl border-blue-500/30">
+                            <p className="text-slate-400 text-xs mb-2">حالة البوابة</p>
+                            <h2 className="text-lg font-bold text-blue-500 animate-pulse">متصل Live</h2>
+                        </div>
+                    </div>
+
+                    <div className="glass-card rounded-3xl overflow-hidden shadow-xl">
+                        <div className="p-6 border-b border-slate-800">
+                            <h3 className="font-bold">سجل العبور الأخير</h3>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-slate-950/50 text-slate-500 text-xs">
+                                    <tr>
+                                        <th className="p-4 text-right">التوقيت</th>
+                                        <th className="p-4 text-right">رقم اللوحة</th>
+                                        <th className="p-4 text-right">التكلفة</th>
+                                        <th className="p-4 text-right">الحالة</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800">
+                                    {logs.map((log, i) => (
+                                        <tr key={i} className="hover:bg-slate-800/30 transition-colors">
+                                            <td className="p-4 text-sm whitespace-nowrap">{new Date(log.created_at).toLocaleTimeString('ar-EG')}</td>
+                                            <td className="p-4 font-mono text-yellow-500">{log.car_plate}</td>
+                                            <td className="p-4 text-red-400 font-bold">-{log.charge}</td>
+                                            <td className="p-4"><span className="bg-blue-500/10 text-blue-400 text-[10px] px-2 py-1 rounded-full border border-blue-500/20">{log.reason}</span></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
